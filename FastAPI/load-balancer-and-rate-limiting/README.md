@@ -3,17 +3,20 @@
 ### [Part 3](#test) - How to test
 ### [Part 3-1](#ex) - Full example of testing
 ### [Part 4](#production) - Best way to run in Production
-
+### [Part 4-1](#guni) - Why Gunicorn
+### [Part 4-2](#load) - Why Load balancing
+### [Part 4-3](#rate) - Why Rate limiting
+### [Part 4-3-1](#431) - Why do we do Rate Limiting in Nginx?
+### [Part 4-3-2](#432) - Why not do Rate Limiting inside the API? 
 
 ---
 ### PART 1 -Introduction  <a id="intro"></a>
 ---
 
-Simple FastAPI + Async SQLAlchemy example (Dockerized)
+The architecture we implemented provides a scalable and high-performance web service. Gunicorn serves as the primary web server for running FastAPI, and by using async workers, it can efficiently handle a large number of concurrent requests. Each FastAPI instance processes incoming requests while avoiding blocking due to I/O operations, which improves response time and overall system performance.
+On top of that, NGINX is used as both a Load Balancer and Rate Limiter. The Load Balancer distributes incoming traffic across multiple FastAPI instances, ensuring high availability and enabling the system to scale horizontally by adding more servers. Meanwhile, Rate Limiting protects the system from overload and potential abuse by limiting the number of requests a single IP can send within a given timeframe.
 
-This project is a Dockerized FastAPI application designed to handle high-concurrency requests efficiently. It uses SQLAlchemy 2 (async) for database interactions and includes two main endpoints: a GET endpoint to fetch items and a POST endpoint to create new items. The application is production-ready, running with Gunicorn and UvicornWorker, which allows multiple worker processes and threads to handle hundreds of simultaneous requests while maintaining fast response times.
-
-Additionally, the project supports automatic database migrations using Alembic, making it easy to keep the database schema up-to-date. Load testing can be performed using tools like wrk for GET-heavy endpoints and hey for POST-heavy endpoints, ensuring that the service performs reliably under real-world traffic. This setup makes the project scalable, stable, and suitable for deployment in production environments.
+The combination of Gunicorn for async request handling, NGINX for load distribution, and rate limiting results in a system that is both reliable and resilient under high load. This setup ensures that even during traffic spikes or potential DoS attacks, the service can continue to respond effectively to users while maintaining stability and performance.
 
 ```
 fastapi-sqlasync/
@@ -30,6 +33,34 @@ fastapi-sqlasync/
 ├─ requirements.txt
 └─ alembic.ini
 ```
+```
+
+          ┌──────────────┐
+          │   Clients    │
+          │(Users / API) │
+          └──────┬───────┘
+                 │ HTTP Requests
+                 ▼
+          ┌──────────────┐
+          │    NGINX     │
+          │ Load Balancer│
+          │ + Rate Limit │
+          └──────┬───────┘
+                 │
+ ┌───────────────┼───────────────┐
+ ▼               ▼               ▼
+┌─────────┐   ┌─────────┐   ┌─────────┐
+│ API 1   │   │ API 2   │   │ API 3   │
+│FastAPI  │   │FastAPI  │   │FastAPI  │
+│Gunicorn │   │Gunicorn │   │Gunicorn │
+└────┬────┘   └────┬────┘   └────┬────┘
+     │             │             │
+     ▼             ▼             ▼
+┌───────────────────────────────────┐
+│          PostgreSQL DB            │
+│  Async connections via SQLAlchemy │
+└───────────────────────────────────┘
+```
 ---
 ### Part 2 - How to run <a id="install"></a>
 ---
@@ -44,7 +75,7 @@ docker-compose up --build -d
 
 ```
 2. Do migrations:
-If you colonize this step is done, but in a case to add new models or change them you have to proceed this step with your specific comment.
+Proceed this step with your specific comment:  
   
 first 
 
@@ -55,6 +86,7 @@ then
 ```
 docker-compose run --rm api alembic upgrade head
 ```
+
 3. Delete the containers if you want to update sth:
 
 ```bash
@@ -280,32 +312,37 @@ This will make it easy to reproduce and monitor performance.
 ---
 ### Part 4 - Best way to run in Production level <a id="production"></a>
 ---
+### Part 4-1 -  Why Gunicorn <a id="Guni"></a>
+---
+Gunicorn / UvicornWorkers
 
-Why use Gunicorn + UvicornWorker in Production?  
+Main purpose: run FastAPI/Django and handle requests.
 
-FastAPI itself runs on an ASGI server like Uvicorn or Hypercorn. But:   
+Advantages:  
+You can specify the number of workers and threads → can handle multiple concurrent requests.  
+Using async workers (UvicornWorker) allows I/O-heavy tasks (like DB/network) to avoid blocking.  
 
-Uvicorn alone runs only a single process.
+Limitations:  
+The number of workers is limited by CPU and RAM → if 1000 requests come simultaneously, a queue may form or requests may timeout.
 
-If the CPU or thread is busy, other requests have to wait.
 
-Gunicorn can spawn multiple worker processes.
+Why use Gunicorn + UvicornWorker in Production?    
+FastAPI itself runs on an ASGI server like Uvicorn or Hypercorn. But:    
+Uvicorn alone runs only a single process.  
+If the CPU or thread is busy, other requests have to wait.  
+Gunicorn can spawn multiple worker processes.  
+Each worker is independent and can handle requests in parallel.  
 
-Each worker is independent and can handle requests in parallel.
+UvicornWorker tells Gunicorn:  
+“I am async, so I can handle I/O-bound requests (DB, network) concurrently.”  
 
-UvicornWorker tells Gunicorn:
+Advantages:  
+High concurrency: hundreds of requests can be processed simultaneously.  
+Stability: if one worker crashes, the others continue running.  
 
-“I am async, so I can handle I/O-bound requests (DB, network) concurrently.”
+CPU utilization: multiple workers make full use of CPU cores.  
 
-Advantages:
-
-High concurrency: hundreds of requests can be processed simultaneously.
-
-Stability: if one worker crashes, the others continue running.
-
-CPU utilization: multiple workers make full use of CPU cores.
-
-Async + Sync combination: threads for concurrent requests, async for I/O-heavy tasks.
+Async + Sync combination: threads for concurrent requests, async for I/O-heavy tasks.  
 
 ####  Do we always need this setup?
 
@@ -403,7 +440,7 @@ For high load (like 1000 concurrent requests), tuning workers, threads, and DB p
 ```
 
                ┌─────────────────────────────┐
-               │        Gunicorn Master       │
+               │        Gunicorn Master      │
                └─────────────┬───────────────┘
                              │
           ┌──────────────────┴──────────────────┐
@@ -412,7 +449,7 @@ For high load (like 1000 concurrent requests), tuning workers, threads, and DB p
    │  Worker 1     │                     │  Worker 2     │
    │ (Process)     │                     │ (Process)     │
    └─────┬─────────┘                     └─────┬─────────┘
-         │                                      │
+         │                                     │
  ┌───────┴───────┐                      ┌──────┴────────┐
  │ Thread 1      │                      │ Thread 1      │
  │ Async handling│                      │ Async handling│
@@ -474,11 +511,110 @@ Actual number depends on DB pool size, network latency, and CPU usage.
 
 🔹 Key Takeaways
 
-Single Uvicorn → only 1 process → limited by CPU → can block requests.
-
-Gunicorn + UvicornWorker → multiple processes + async → high concurrency.
-
-Threads + async → more requests handled concurrently per worker.
-
+- Single Uvicorn → only 1 process → limited by CPU → can block requests.
+- Gunicorn + UvicornWorker → multiple processes + async → high concurrency.
+- Threads + async → more requests handled concurrently per worker.
 Ideal for production with many simultaneous users and I/O-heavy endpoints.
 
+---
+### Part 4-2 -  Why Load Balancer (NGINX) <a id="load"></a>
+---
+Main purpose: distribute load between multiple instances of the application.  
+
+Advantages:  
+- You can run multiple Gunicorn/FastAPI instances and balance traffic between them.  
+- If one instance fails, the others continue → high availability.  
+
+Limitations:   
+- The load balancer cannot prevent attacks or floods by itself.  
+- It only distributes load, it does not control traffic.  
+
+---
+### Part 4-2 -  Rate Limiting (NGINX) <a id="rate"></a>
+---
+
+Main purpose: prevent overload and attacks (DoS, flood).
+
+Advantages:
+- Limit the number of requests per IP per time unit → protects the system from saturation.
+- When traffic is high, it prevents a few IPs from consuming all resources.
+
+Limitations:
+- Rate limiting cannot perform load balancing.
+- It only protects against excessive requests, it does not improve performance.
+
+✅ Why use all three together?  
+Component	Main Purpose  
+- Gunicorn / Uvicorn	Run the app, handle concurrency  
+- Load Balancer	Distribute load between instances, high availability  
+- Rate Limiting	Protect against floods and overload  
+
+Together:
+Gunicorn → process requests  
+- NGINX Load Balancer → distribute requests between multiple Gunicorn instances
+- NGINX Rate Limit → prevent any single IP from consuming too many resources
+- Result → a scalable, stable, and attack-resistant system with low latency.
+
+💡 Real-world example:   
+Suppose 1000 users send POST requests at the same time:  
+Without Rate Limiting: all requests go to Gunicorn → long queues → timeout and crash.  
+Without Load Balancer: only one instance handles requests → CPU/RAM limits reached.  
+With both: requests are distributed between instances, and no single IP can monopolize resources → system stays healthy.  
+
+---
+### Part 4-3-1 -  Why do we do Rate Limiting in Nginx? <a id="431"></a>
+---
+ Why do we do Rate Limiting in Nginx?  
+Advantages:  
+- Reduces load on the API
+- Requests that exceed the limit never reach the application.
+
+Example: 1,000 simultaneous requests → 900 are blocked → API handles only 100 requests.
+
+This saves CPU and memory on your app and database.
+
+High performance
+
+Nginx is written in C and handles rate limiting very efficiently.
+
+No Python/Django/FastAPI overhead.
+
+Protects against attacks (DDoS / spam)
+
+Blocks abusive traffic before it reaches your API.
+
+Works for multiple APIs
+
+If you have multiple services behind a load balancer, Nginx can handle rate limiting centrally.
+
+---
+### Part 4-3-2 -  Why not do it inside the API? <a id="432"></a>
+---
+
+Disadvantages:  
+- Adds load to the API  
+- Even requests that should be blocked reach your application.  
+- CPU, memory, and database connections are consumed unnecessarily.  
+- More complexity  
+- You need custom code for rate limiting, usually with Redis or a database.  
+- Managing bursts and concurrency is harder.  
+- Less effective under high load
+- With thousands of simultaneous requests, the API itself can get overwhelmed before rate limiting takes effect.
+
+
+### Summary of benefits
+
+- Reduces API and database load
+- Protects the app before it processes requests
+- Better handling of high traffic scenarios
+- Easier for multiple services behind a load balancer
+
+🔹 Practical conclusion
+Where to apply	Best for	Disadvantages
+Nginx / Load Balancer	High load, multiple services, DDoS protection	Less flexibility for complex API logic (e.g., per-user rules)
+Inside API	Complex rules (e.g., per user, subscription tier)	Adds load to API, slower under high traffic
+
+💡 Recommended hybrid approach:
+
+- General/simple rate limiting → handled by Nginx
+- Advanced per-user rules → handled inside the API
