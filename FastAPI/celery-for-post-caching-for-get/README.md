@@ -55,21 +55,21 @@ docker-compose run --rm api alembic revision --autogenerate -m "create items tab
 then 
 ```
 docker-compose run --rm api alembic upgrade head
-
-
-&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+```
+If there is an unwanted migrations you can delete it through your datbase  terminal, in Docker inside the database container there is a exec tab, click it and type below command:
 ```
 psql -U postgres -d db
 ```
-
+Then check if the mentioned unwanted imigration version (for example: 56fd7c30fb14 ) exists:
 ```
 SELECT * FROM alembic_version;
 ```
+If the version exists, delete it with below command:
 ```
 DELETE FROM alembic_version WHERE version_num='56fd7c30fb14';
 ```
-```
-4. Delete the containers if you want to update sth:
+
+3. Delete the containers if you want to update sth:
 
 ```bash
  docker-compose down -v      
@@ -295,36 +295,30 @@ This will make it easy to reproduce and monitor performance.
 ---
 ### Part 4 - Best way to run in Production level <a id="production"></a>
 ---
-✅ Final Architecture Summary (English)
-🔹 POST /items
+Final  Summary 
 
-The API returns immediately.
+#### POST /items
 
-The data is pushed to RabbitMQ.
+- The API returns immediately.
+- The data is pushed to RabbitMQ.
+- A worker receives the job → processes it asynchronously using SQLAlchemy async → stores it in the database.
+- After saving, it invalidates any cached GET results.
 
-A worker receives the job → processes it asynchronously using SQLAlchemy async → stores it in the database.
+####  GET /items
 
-After saving, it invalidates any cached GET results.
+- If the cache exists → response is returned in milliseconds.
+- If not → data is fetched from the database and stored in Redis for future requests.
 
-🔹 GET /items
+####  Gunicorn + UvicornWorker
 
-If the cache exists → response is returned in milliseconds.
+- Fully async event loop.
+- Easily handles ~1000 concurrent connections without blocking.
 
-If not → data is fetched from the database and stored in Redis for future requests.
+####  Full Dockerized Setup
 
-🔹 Gunicorn + UvicornWorker
-
-Fully async event loop.
-
-Easily handles ~1000 concurrent connections without blocking.
-
-🔹 Full Dockerized Setup
-
-Each service runs independently.
-
-Everything can be scaled horizontally.
-
-Ideal for load testing and production deployment.
+- Each service runs independently.
+- Everything can be scaled horizontally.
+- Ideal for load testing and production deployment.
 
 ---
 ### Part 4-1 - Why Gunicorn ? <a id="41"></a>
@@ -379,14 +373,14 @@ Full command:
 ```bash
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4 --threads 2
 ```
-1. Gunicorn  
+#### 1. Gunicorn  
 Gunicorn is a WSGI/ASGI server that runs Python apps in production.
 
 Its main job is managing multiple workers and distributing incoming requests among them.
 
 Reason for using: Uvicorn alone is fine for development or low load, but for production, Gunicorn + workers is better.
 
-2. app.main:app
+#### 2. app.main:app
 
 This tells Gunicorn which FastAPI app to run:
 
@@ -396,19 +390,19 @@ app → the FastAPI instance (app = FastAPI(...))
 
 Without this, Gunicorn wouldn’t know which app to start.
 
-3.  -k uvicorn.workers.UvicornWorker
+#### 3.  -k uvicorn.workers.UvicornWorker
 
 -k specifies the worker class.
 
 UvicornWorker is an async worker, which can handle multiple concurrent I/O-bound requests (like DB or network calls).  
 Without this, Gunicorn defaults to synchronous workers, which cannot properly handle async FastAPI endpoints.  
 
-4.  --bind 0.0.0.0:8000
+#### 4.  --bind 0.0.0.0:8000
 
 This makes Gunicorn listen on all network interfaces (0.0.0.0) and port 8000.  
 Important so that the container can accept requests from outside or via Docker Compose.  
 
-5.  --workers 4
+#### 5.  --workers 4
 
 Number of independent processes Gunicorn runs.  
 Each worker can handle multiple requests.  
@@ -416,7 +410,7 @@ Rule of thumb: workers ≈ number of CPU cores.
 
 Example: 4 CPU cores → 4 workers.  
 
-6.  --threads 2
+#### 6.  --threads 2
 
 Each worker can spawn multiple threads.  
 More threads allow higher concurrency.  
@@ -452,7 +446,7 @@ For high load (like 1000 concurrent requests), tuning workers, threads, and DB p
    │  Worker 1     │                     │  Worker 2     │
    │ (Process)     │                     │ (Process)     │
    └─────┬─────────┘                     └─────┬─────────┘
-         │                                      │
+         │                                     │
  ┌───────┴───────┐                      ┌──────┴────────┐
  │ Thread 1      │                      │ Thread 1      │
  │ Async handling│                      │ Async handling│
