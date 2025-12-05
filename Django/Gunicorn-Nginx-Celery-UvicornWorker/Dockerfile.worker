@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# مهم: این خط رو حتماً بذار تا سلری پروژه رو پیدا کنه
+ENV PYTHONPATH=/usr/src/app
+
+WORKDIR /usr/src/app
+
+# نصب وابستگی‌های سیستم
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# کپی و نصب پکیج‌ها
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# کپی کل پروژه (شامل project/ و app/)
+COPY . .
+
+# اجرای Celery Worker
+CMD ["celery", "-A", "project", "worker", "--loglevel=info", "--concurrency=4"]

@@ -1,0 +1,13 @@
+<h1>Dashboard</h1>
+
+{% load cache %}
+
+{% cache 30 fragment_items %}
+<ul>
+    {% for item in items %}
+    <li>{{ item.name }}</li>
+    {% endfor %}
+</ul>
+{% endcache %}
+
+<p>Rendered at {{ now }}</p>

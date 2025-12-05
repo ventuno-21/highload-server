@@ -1,0 +1,8 @@
+[tool.poetry.dependencies]
+django = "^4.3"
+djangorestframework = "^3.20"
+celery = "^5.5"
+django-redis = "^6.2"
+prometheus-client = "^0.20"
+django-prometheus = "^2.2"
+pymongo = "^4.7"

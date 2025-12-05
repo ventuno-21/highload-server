@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/usr/src/app
+
+WORKDIR /usr/src/app
+
+# Install system deps
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt /usr/src/app/
+
+# Install Python deps
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+# RUN pip freeze > requirements.txt
+
+# Copy project
+COPY . .
+
+# Run Django with Gunicorn + UvicornWorker
+CMD ["gunicorn", "project.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--workers", "2", "--worker-connections", "1000", "--threads", "2", "--bind", "0.0.0.0:8000", "--timeout", "60"]
