@@ -12,7 +12,7 @@
 #### [Part 4-7](#47) - Rate Limiting (Nginx + Django) 
 #### [Part 4-8](#48) - Load-Shedding (protecting the server when overloaded)
 #### [Part 4-9](#49) - Backpressure (slowing the request flow)  
-### [Part 5](#5) - Docker
+
 
 
 
@@ -25,7 +25,11 @@
 ---
 ### PART 1 -Introduction  <a id="intro"></a>
 ---
+So far, the project is a modern web system focused on high concurrency and full observability. In this project, we have used Django as the main framework and Django REST Framework (DRF) for building REST APIs, which allows us to create both synchronous and asynchronous views. The goal of this part of the project was to provide CRUD operations on the Item model and to log events in MongoDB, so that multiple concurrent requests could be handled without overloading the database. For this purpose, async/await in asynchronous views and sync_to_async for interacting with the ORM have been implemented.
 
+For the data layer, PostgreSQL is used as the relational database and MongoDB is used for storing logs and analytical events. To manage high numbers of connections and prevent database overload, PGbouncer is used for connection pooling on PostgreSQL, and a singleton MongoClient with a limited pool size is used for MongoDB. Additionally, to optimize data reading and reduce response time, Redis and different caching strategies (Per-view cache and Low-level cache) have been applied.
+
+For monitoring and observability, Prometheus is used to collect metrics from each endpoint and Celery task, with counters and histograms tracking API execution and response times. Moreover, Celery + RabbitMQ are employed for background and heavy-lifting tasks to keep the main application thread free from pressure. The combination of these technologies allows us to build a robust, scalable, and observable project that can efficiently handle thousands of concurrent requests and is ready for the next stages of data analysis and cache invalidation.
 
 
 ```
@@ -66,48 +70,85 @@ project-root/
 ---
 ### Part 2 - How to run <a id="install"></a>
 ---
-After pulling or Cloning the repo, follow below steps:
+1. After pulling or Cloning the repo, follow below steps
 
 
-1. Build & start:
+2. Build & start 
 
-
+#### In production-level
 ```bash
-docker-compose up --build -d
+docker-compose up --build
 
 ```
-2. Do migrations:
-If you colonize this step is done, but in a case to add new models or change them you have to proceed this step with your specific comment.
-  
-first 
+Do migrations:
 
 ```
-docker-compose run --rm api alembic revision --autogenerate -m "create items table"
-```
-then 
-```
-docker-compose run --rm api alembic upgrade head
-```
-If there is an unwanted migrations you can delete it through your datbase  terminal, in Docker inside the database container there is a exec tab, click it and type below command:
-```
-psql -U postgres -d db
-```
-Then check if the mentioned unwanted imigration version (for example: 56fd7c30fb14 ) exists:
-```
-SELECT * FROM alembic_version;
-```
-If the version exists, delete it with below command:
-```
-DELETE FROM alembic_version WHERE version_num='56fd7c30fb14';
-```
+docker-compose run web python manage.py makemigrations
+docker-compose run web migrate
 
-3. Delete the containers if you want to update sth:
-
-```bash
- docker-compose down -v      
 ```
 
 
+#### in Development-level
+
+Build an image
+```
+docker compose build
+```
+Up the containers
+```
+docker compose -f docker-compose.dev.yml up -d
+```
+make migrations:
+```
+docker compose -f docker-compose.dev.yml  run web python manage.py makemigrations
+docker compose -f docker-compose.dev.yml  run web python manage.py migrate
+```
+
+#### useful docker commands:
+How to remove created containers(not an image only containers)
+:
+```
+# in development
+docker-compose -f docker-compose.dev.yml down -v
+# in development & production  
+docker-compose down -v
+```
+- **-f**: stands for **file**
+- **-v**: stands for **volume**
+in production-level:
+
+how to see last 50 logs of "web" container in your terminal:
+```
+docker compose logs web --tail 50
+```
+Test if your web container is okay:
+```
+ curl -I http://localhost
+ ```
+
+ if response be sth like below is okay:
+ ```
+ HTTP/1.1 404 Not Found
+Server: nginx
+Date: Mon, 01 Dec 2025 14:54:09 GMT   
+Content-Type: text/html; charset=utf-8
+Content-Length: 2574  
+Connection: keep-alive
+x-frame-options: DENY
+x-content-type-options: nosniff
+referrer-policy: same-origin
+cross-origin-opener-policy: same-origin
+```
+
+If you add or revise a model how to do a migraion:
+```
+docker compose exec web python manage.py makemigrations
+
+# then
+
+docker compose exec web python manage.py migrate
+```
 
 ---
 ### Part 3 - How to test  <a id="test"></a>
@@ -120,7 +161,7 @@ wrk -t10 -c100 -d30s http://localhost:8000/items
 ```
 Test POST 100 concurrent 1000 requests:
 ```
-hey -n 1000 -c 100 -m POST -H "Content-Type: application/json" -d '{"name":"x","description":"y"}' http://localhost:8000/items
+hey -n 1000 -c 100 -m POST -H "Content-Type: application/json" -d '{"name":"x","description":"y"}' http://localhost:8000/whatever
 ```
 
 #### 1. What are wrk and hey?
@@ -149,13 +190,13 @@ Options:
 
 Example:
 ```
-wrk -t10 -c100 -d30s http://localhost:8000/items
+wrk -t10 -c100 -d30s http://localhost:8000/<whatever>
 ```
 
 Meaning:
 10 threads  
 100 concurrent connections  
-30 seconds of sending GET requests to /items  
+30 seconds of sending GET requests to /<whatever> 
 
 💡 Output: shows throughput, latency, and number of successful/failed requests.
 
@@ -174,14 +215,14 @@ Options:
 
 Example:
 ```
-hey -n 1000 -c 100 -m POST -H "Content-Type: application/json" -d '{"name":"x","description":"y"}' http://localhost:8000/items
+hey -n 1000 -c 100 -m POST -H "Content-Type: application/json" -d '{"name":"x","description":"y"}' http://localhost:8000/<watever>
 ```
 
 Meaning:
 1000 POST requests  
 100 concurrent requests  
 Sending JSON {"name":"x","description":"y"}  
-To the /items endpoint  
+To the /<watever> endpoint  
 
 💡 Output: shows latency, success rate, errors, and RPS (requests per second).
 
@@ -229,15 +270,15 @@ http://localhost:8000
 
 Endpoints:
 
-GET /items
+GET /<whatever>
 
-POST /items with JSON { "name": "x", "description": "y" }
+POST /<whatever> with JSON { "name": "x", "description": "y" }
 
 #### 2. Test GET requests with wrk
 
 Command:
 ```
-wrk -t10 -c100 -d30s http://localhost:8000/items
+wrk -t10 -c100 -d30s http://localhost:8000/<whatever>
 ```
 
 Explanation:
@@ -248,7 +289,7 @@ Explanation:
 
 Example Output (simulated):
 ```
-Running 30s test @ http://localhost:8000/items
+Running 30s test @ http://localhost:8000/<whatever>
   10 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency     2.5ms    1.2ms  30.0ms   95%
@@ -273,7 +314,7 @@ Command:
 hey -n 1000 -c 100 -m POST \
     -H "Content-Type: application/json" \
     -d '{"name":"x","description":"y"}' \
-    http://localhost:8000/items
+    http://localhost:8000/whatever
 ```
 
 Explanation:
@@ -281,7 +322,7 @@ Explanation:
 -n 1000 → total 1000 POST requests  
 -c 100 → 100 concurrent requests  
 
-Sends JSON payload to /items
+Sends JSON payload to /whatever
 
 Example Output (simulated):
 ```
@@ -329,32 +370,7 @@ This will make it easy to reproduce and monitor performance.
 ---
 ### Part 4 - Best way to run in Production level <a id="production"></a>
 ---
-Final  Summary 
 
-#### POST /items
-
-- The API returns immediately.
-- The data is pushed to RabbitMQ.
-- A worker receives the job → processes it asynchronously using SQLAlchemy async → stores it in the database.
-- After saving, it invalidates any cached GET results.
-
-####  GET /items
-
-- If the cache exists → response is returned in milliseconds.
-- If not → data is fetched from the database and stored in Redis for future requests.
-
-####  Gunicorn + UvicornWorker
-
-- Fully async event loop.
-- Easily handles ~1000 concurrent connections without blocking.
-
-####  Full Dockerized Setup
-
-- Each service runs independently.
-- Everything can be scaled horizontally.
-- Ideal for load testing and production deployment.
-
----
 ### Part 4-1 - Why PgBouncer ? <a id="41"></a>
 ---
 
@@ -822,7 +838,7 @@ Think of it as handing a box to a conveyor belt instead of carrying it yourself 
 - If the endpoint returns created data immediately.
 - If you don't want eventual consistency (slight delay before data appears).
 
-#### Where Celery is commonly used in real FastAPI high-load systems:
+#### Where Celery is commonly used in real Django high-load systems:
 - Sending emails/SMS/notifications
 - Processing images/video/audio
 - Writing logs or analytics
@@ -836,6 +852,10 @@ Think of it as handing a box to a conveyor belt instead of carrying it yourself 
 - You expect thousands of concurrent POST requests.
 - Your API must remain fast and never block.
 - You want to fully separate API workloads from heavy workloads.
+
+
+
+
 
 ---
 ### Part 4-4 - psycopg2 vs psycopg2-binary in 2025  <a id="44"></a>
@@ -1198,65 +1218,3 @@ class SyncPostAPI(APIView):
 - preventing the Gunicorn worker from taking too many requests at once
 - This is a lightweight but extremely effective backpressure technique.
 
-
-
-
-
-
-
----
-### PART 5 - Docker  <a id="5"></a>
----
-
-how to build an image of project:
-```
-docker compose build
-```
-
-#### how to run containers in different level:
-in development-level:
-```
-docker compose up -d
-```
-in Development-level:
-```
-docker compose -f docker-compose.dev.yml up -d
-```
-How to remove created containers(not an image only containers)
-:
-```
-docker-compose -f docker-compose.dev.yml down -v
-```
-in production-level:
-
-how to see last 50 logs of "web" container in your terminal:
-```
-docker compose logs web --tail 50
-```
-Test if your web container is okay:
-```
- curl -I http://localhost
- ```
-
- if response be sth like below is okay:
- ```
- HTTP/1.1 404 Not Found
-Server: nginx
-Date: Mon, 01 Dec 2025 14:54:09 GMT   
-Content-Type: text/html; charset=utf-8
-Content-Length: 2574  
-Connection: keep-alive
-x-frame-options: DENY
-x-content-type-options: nosniff
-referrer-policy: same-origin
-cross-origin-opener-policy: same-origin
-```
-
-If you add or revise a model how to do a migraion:
-```
-docker compose exec web python manage.py makemigrations
-
-# then
-
-docker compose exec web python manage.py migrate
-```
